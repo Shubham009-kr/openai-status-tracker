@@ -4,9 +4,13 @@ from datetime import datetime
 import re
 import os
 import sys
+import time
 
 FEED_URL = "https://status.openai.com/history.atom"
 STATE_FILE = "last_seen.txt"
+
+HOSTED_MODE = os.getenv("HOSTED_MODE", "false").lower() == "true"
+CHECK_INTERVAL = 60
 
 
 def clean_html(text: str) -> str:
@@ -21,7 +25,7 @@ def generate_id(entry) -> str:
     return hashlib.sha256(base.encode()).hexdigest()
 
 
-def load_last_seen() -> str | None:
+def load_last_seen():
     if not os.path.exists(STATE_FILE):
         return None
     try:
@@ -31,7 +35,7 @@ def load_last_seen() -> str | None:
         return None
 
 
-def save_last_seen(update_id: str) -> None:
+def save_last_seen(update_id: str):
     try:
         with open(STATE_FILE, "w") as f:
             f.write(update_id)
@@ -56,45 +60,18 @@ def fetch_feed():
         feed = feedparser.parse(FEED_URL)
     except Exception:
         print("❌ Failed to fetch status feed.")
-        sys.exit(1)
+        return []
 
-    if not feed.entries:
-        print("ℹ️ No status data available.")
-        sys.exit(0)
-
-    return feed.entries
+    return feed.entries or []
 
 
-def show_full_logs(entries):
-    print("\n📜 FULL STATUS LOGS\n")
-    for entry in entries:
-        print(format_log(entry))
-    print("—" * 40)
-
-
-def user_menu(entries):
-    while True:
-        print("\nOptions:")
-        print("1. View full logs")
-        print("2. Exit")
-
-        choice = input("Enter choice (1/2): ").strip()
-
-        if choice == "1":
-            show_full_logs(entries)
-        elif choice == "2":
-            print("\n👋 Exiting. Monitoring stopped.")
-            break
-        else:
-            print("❌ Invalid input. Please enter 1 or 2.")
-
-
-def main():
-    print("🔍 OpenAI Status Monitor\n")
-
+def run_once():
     entries = fetch_feed()
-    latest_entry = entries[0]
+    if not entries:
+        print("ℹ️ No status data available.")
+        return
 
+    latest_entry = entries[0]
     latest_id = generate_id(latest_entry)
     last_seen_id = load_last_seen()
 
@@ -107,7 +84,42 @@ def main():
         print("Last known update:\n")
         print(format_log(latest_entry))
 
-    user_menu(entries)
+
+def interactive_menu(entries):
+    while True:
+        print("\nOptions:")
+        print("1. View full logs")
+        print("2. Exit")
+
+        try:
+            choice = input("Enter choice (1/2): ").strip()
+        except EOFError:
+            print("\n⚠️ Input not available. Exiting.")
+            break
+
+        if choice == "1":
+            print("\n📜 FULL STATUS LOGS\n")
+            for entry in entries:
+                print(format_log(entry))
+        elif choice == "2":
+            print("\n👋 Exiting.")
+            break
+        else:
+            print("❌ Invalid input.")
+
+
+def main():
+    print("🔍 OpenAI Status Monitor\n")
+
+    if HOSTED_MODE:
+        print("🚀 Running in HOSTED MODE (non-interactive)\n")
+        while True:
+            run_once()
+            time.sleep(CHECK_INTERVAL)
+    else:
+        entries = fetch_feed()
+        run_once()
+        interactive_menu(entries)
 
 
 if __name__ == "__main__":
